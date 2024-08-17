@@ -47,7 +47,7 @@ pipeline {
                 script {
                     // Deploy to Tomcat 9 using the Deploy to Container plugin
                     deploy adapters: [
-                        tomcat9(credentialsId: 'admin', 
+                        tomcat9(credentialsId: 'tomcat', 
                                 path: '', 
                                 url: 'http://3.92.144.224:8081/manager/text')
                     ], 
