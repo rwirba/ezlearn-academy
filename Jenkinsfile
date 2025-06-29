@@ -1,60 +1,60 @@
 pipeline {
-    agent { label 'slave' }
-
-    stages {
-        stage('Checkout') {
-            steps {
-                // Checkout code from SCM
-                git branch: 'master', url: 'https://github.com/rwirba/ezlearn-academy.git'
-            }
-        }
-
-        stage('Compile') {
-            steps {
-                // Run Maven compile
-                sh '/opt/maven/bin/mvn clean compile'
-            }
-        }
-
-        stage('Build (Package)') {
-            steps {
-                // Run Maven package to build the WAR file
-                sh '/opt/maven/bin/mvn clean package'
-            }
-            post {
-                // Archive the WAR file
-                always {
-                    archiveArtifacts artifacts: 'target/*.war', allowEmptyArchive: true
-                }
-            }
-        }
-
-        stage('Test') {
-            steps {
-                // Run Maven tests
-                sh '/opt/maven/bin/mvn test'
-            }
-            post {
-                // Archive test results
-                always {
-                    junit '**/target/surefire-reports/*.xml'
-                }
-            }
-        }
-
-        stage('Deploy to Tomcat') {
-            steps {
-                script {
-                    // Deploy to Tomcat 9 using the Deploy to Container plugin
-                    deploy adapters: [
-                        tomcat9(credentialsId: 'tomcat', 
-                                path: '', 
-                                url: 'http://3.92.144.224:8081/manager/text')
-                    ], 
-                    war: '**/*.war',
-                    contextPath: '/'
-                }
-            }
-        }
-    }
+ agent { label 'infra-build-node' }
+ environment {
+     SONAR_SCANNER = tool 'SonarQubeScanner'
+     NEXUS_URL = 'http://nexus.mitechnology.org:8081/'
+     TOMCAT_URL = 'http://tomcat.mitechnology.org:8080/manager/text'
+ }
+ stages {
+     stage('Build & Test') {
+         steps {
+             sh 'mvn clean package'
+         }
+     }
+     stage('Code Quality Scan') {
+         steps {
+             withSonarQubeEnv('SonarQube') {
+                 sh """
+                     ${SONAR_SCANNER}/bin/sonar-scanner \
+                     -Dsonar.projectKey=myapp \
+                     -Dsonar.java.binasets=target/classes
+                 """
+             }
+         }
+     }
+     stage('Deploy to Nexus') {
+         steps {
+             withCredentials([usernamePassword(
+                 credentialsId: 'nexus-creds',
+                 usernameVariable: 'NEXUS_USER',
+                 passwordVariable: 'NEXUS_PASS'
+             )]) {
+                 sh '''
+                     mvn deploy:deploy-file \
+                     -Durl=${NEXUS_URL}/repository/maven-releases/ \
+                     -DrepositoryId=nexus \
+                     -Dfile=target/*.war \
+                     -DgroupId=com.myapp \
+                     -DartifactId=myapp \
+                     -Dversion=1.0
+                 '''
+             }
+         }
+     }
+     stage('Deploy to Tomcat') {
+         steps {
+             withCredentials([usernamePassword(
+                 credentialsId: 'tomcat-deployer',
+                 usernameVariable: 'TOMCAT_USER',
+                 passwordVariable: 'TOMCAT_PASS'
+             )]) {
+                 sh '''
+                     curl -u "${TOMCAT_USER}:${TOMCAT_PASS}" \
+                     -T target/*.war \
+                     "${TOMCAT_URL}/deploy?path=/myapp&update=true"
+                 '''
+             }
+         }
+     }
+ }
 }
